@@ -6,7 +6,7 @@ const config = {
     physics: {
         default: 'arcade',
         arcade: {
-            gravity: { y: 600 },
+            gravity: { y: 0 },
             debug: false
         }
     },
@@ -24,7 +24,9 @@ let enemies;
 let lastFired = 0;
 const BULLET_DELAY = 400;
 let facing = 'right';
+let moveDirection = new Phaser.Math.Vector2(1, 0);
 let fireResetTimer = null;
+let gameStarted = false;
 
 const game = new Phaser.Game(config);
 
@@ -42,21 +44,20 @@ function preload() {
 }
 
 function create() {
-    // simple ground
-    const ground = this.add.rectangle(400, 590, 800, 20, 0x222222);
-    this.physics.add.existing(ground, true);
+    this.physics.world.setBounds(0, 0, 800, 600);
 
     // player sprite
-    player = this.physics.add.sprite(100, 500, 'hero_right');
+    player = this.physics.add.sprite(400, 300, 'hero_right');
     player.setCollideWorldBounds(true);
+    player.body.setAllowGravity(false);
+    player.setDrag(400);
+    player.setMaxVelocity(260, 260);
 
     // groups
     bullets = this.physics.add.group();
     enemies = this.physics.add.group();
 
     // collisions
-    this.physics.add.collider(player, ground);
-    this.physics.add.collider(enemies, ground);
     this.physics.add.overlap(bullets, enemies, hitEnemy, null, this);
 
     // keyboard keys
@@ -65,43 +66,95 @@ function create() {
         down: 'S',
         right: 'D',
         left: 'A',
-        jump: 'SPACE',
-        fire: 'ENTER'
+        fire: 'SPACE'
     });
 
-    // enemy spawn event
-    this.time.addEvent({
-        delay: 2000,
-        callback: spawnEnemy,
-        callbackScope: this,
-        loop: true
-    });
+    // pause physics until the player presses start
+    this.physics.pause();
+
+    const startButton = document.getElementById('start-button');
+    if (startButton) {
+        startButton.classList.remove('hidden');
+        startButton.disabled = false;
+
+        startButton.addEventListener('click', () => {
+            if (gameStarted) {
+                return;
+            }
+
+            gameStarted = true;
+            startButton.classList.add('hidden');
+            this.physics.resume();
+
+            this.time.addEvent({
+                delay: 1200,
+                callback: spawnEnemy,
+                callbackScope: this,
+                loop: true
+            });
+        }, { once: true });
+    }
 }
 
 function spawnEnemy() {
-    const enemy = this.physics.add.sprite(820, 520, 'enemy');
-    enemy.setVelocityX(-50);
+    const spawnEdge = Phaser.Math.Between(0, 3);
+    let x = 0;
+    let y = 0;
+
+    switch (spawnEdge) {
+        case 0: // top
+            x = Phaser.Math.Between(40, 760);
+            y = -40;
+            break;
+        case 1: // right
+            x = 840;
+            y = Phaser.Math.Between(40, 560);
+            break;
+        case 2: // bottom
+            x = Phaser.Math.Between(40, 760);
+            y = 640;
+            break;
+        default: // left
+            x = -40;
+            y = Phaser.Math.Between(40, 560);
+            break;
+    }
+
+    const enemy = this.physics.add.sprite(x, y, 'enemy');
+    enemy.body.setAllowGravity(false);
+    enemy.setCollideWorldBounds(false);
+    enemy.setData('speed', Phaser.Math.Between(70, 110));
     enemies.add(enemy);
 }
 
 function fireBullet() {
-    // choose bullet sprite based on facing
+    const direction = moveDirection.lengthSq() > 0
+        ? moveDirection.clone().normalize()
+        : new Phaser.Math.Vector2(facing === 'left' ? -1 : 1, 0);
+
+    if (direction.x < 0) {
+        facing = 'left';
+    } else if (direction.x > 0) {
+        facing = 'right';
+    }
+
     const bulletKey = facing === 'left' ? 'bullet_left' : 'bullet_right';
-    const offset = facing === 'left' ? -20 : 20;
-    const bullet = this.physics.add.sprite(player.x + offset, player.y, bulletKey);
-    bullet.setVelocityX(facing === 'left' ? -400 : 400);
-    bullet.setCollideWorldBounds(false);
+    const bullet = this.physics.add.sprite(
+        player.x + direction.x * 24,
+        player.y + direction.y * 24,
+        bulletKey
+    );
     bullet.body.setAllowGravity(false);
+    bullet.setVelocity(direction.x * 480, direction.y * 480);
+    bullet.setCollideWorldBounds(false);
     bullets.add(bullet);
 
-    // change player texture to firing frame
     player.setTexture(facing === 'left' ? 'hero_left_fire' : 'hero_right_fire');
 
-    // reset to stance after short time
     if (fireResetTimer) {
         fireResetTimer.remove(false);
     }
-    fireResetTimer = this.time.delayedCall(200, () => {
+    fireResetTimer = this.time.delayedCall(180, () => {
         player.setTexture(facing === 'left' ? 'hero_left' : 'hero_right');
     });
 }
@@ -112,34 +165,39 @@ function hitEnemy(bullet, enemy) {
 }
 
 function update(time) {
-    // reset horizontal velocity
-    player.setVelocityX(0);
+    if (!gameStarted) {
+        return;
+    }
 
-    // horizontal movement and facing
+    // reset horizontal velocity
+    const velocity = new Phaser.Math.Vector2(0, 0);
+
     if (keys.left.isDown) {
-        player.setVelocityX(-160);
-        if (facing !== 'left') {
+        velocity.x -= 1;
+    }
+    if (keys.right.isDown) {
+        velocity.x += 1;
+    }
+    if (keys.up.isDown) {
+        velocity.y -= 1;
+    }
+    if (keys.down.isDown) {
+        velocity.y += 1;
+    }
+
+    if (velocity.lengthSq() > 0) {
+        moveDirection = velocity.clone().normalize();
+        player.setVelocity(moveDirection.x * 220, moveDirection.y * 220);
+
+        if (moveDirection.x < 0 && facing !== 'left') {
             facing = 'left';
             player.setTexture('hero_left');
-        }
-    } else if (keys.right.isDown) {
-        player.setVelocityX(160);
-        if (facing !== 'right') {
+        } else if (moveDirection.x > 0 && facing !== 'right') {
             facing = 'right';
             player.setTexture('hero_right');
         }
-    }
-
-    // vertical movement (optional up/down)
-    if (keys.up.isDown) {
-        player.setVelocityY(-160);
-    } else if (keys.down.isDown) {
-        player.setVelocityY(160);
-    }
-
-    // jump
-    if (Phaser.Input.Keyboard.JustDown(keys.jump) && player.body.blocked.down) {
-        player.setVelocityY(-330);
+    } else {
+        player.setVelocity(0, 0);
     }
 
     // fire bullet
@@ -150,8 +208,20 @@ function update(time) {
 
     // remove bullets offscreen
     bullets.children.each(function (b) {
-        if (b.x < -20 || b.x > 820) {
+        if (b.x < -40 || b.x > 840 || b.y < -40 || b.y > 640) {
             b.destroy();
         }
+    }, this);
+
+    // keep enemies chasing the player
+    enemies.children.each(function (enemy) {
+        if (!enemy.active) {
+            return;
+        }
+
+        const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+        const speed = enemy.getData('speed') || 80;
+        this.physics.velocityFromRotation(angle, speed, enemy.body.velocity);
+        enemy.body.setAllowGravity(false);
     }, this);
 }
