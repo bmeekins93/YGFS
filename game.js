@@ -15,7 +15,6 @@ const config = {
         create: create,
         update: update
     }
-};
 
 let player;
 let keys;
@@ -159,10 +158,10 @@ function fireBullet() {
     });
 }
 
-function hitEnemy(bullet, enemy) {
-    bullet.destroy();
-    enemy.destroy();
-}
+    update(time) {
+        if (!this.gameStarted) {
+            return;
+        }
 
 function update(time) {
     if (!gameStarted) {
@@ -200,10 +199,52 @@ function update(time) {
         player.setVelocity(0, 0);
     }
 
-    // fire bullet
-    if (Phaser.Input.Keyboard.JustDown(keys.fire) && time > lastFired) {
-        fireBullet.call(this);
-        lastFired = time + BULLET_DELAY;
+    #fireBullet() {
+        const direction = this.moveDirection.lengthSq() > 0
+            ? this.moveDirection.clone().normalize()
+            : new Phaser.Math.Vector2(this.facing === 'left' ? -1 : 1, 0);
+
+        if (direction.x < 0) {
+            this.facing = 'left';
+        } else if (direction.x > 0) {
+            this.facing = 'right';
+        }
+
+        const bulletKey = this.facing === 'left' ? 'bullet_left' : 'bullet_right';
+        const bullet = this.physics.add.sprite(
+            this.player.x + direction.x * 18,
+            this.player.y + direction.y * 18,
+            bulletKey
+        );
+        bullet.body.setAllowGravity(false);
+        bullet.setVelocity(direction.x * BULLET_SPEED, direction.y * BULLET_SPEED);
+        bullet.setDepth(2);
+
+        this.#applySpriteScale(bullet, bulletKey, BULLET_TARGET_HEIGHT, 1);
+
+        this.bullets.add(bullet);
+
+        this.player.setTexture(this.facing === 'left' ? 'hero_left_fire' : 'hero_right_fire');
+        this.#applySpriteScale(
+            this.player,
+            this.facing === 'left' ? 'hero_left_fire' : 'hero_right_fire',
+            PLAYER_TARGET_HEIGHT,
+            0.7
+        );
+
+        if (this.fireResetTimer) {
+            this.fireResetTimer.remove(false);
+        }
+
+        this.fireResetTimer = this.time.delayedCall(160, () => {
+            this.player.setTexture(this.facing === 'left' ? 'hero_left' : 'hero_right');
+            this.#applySpriteScale(
+                this.player,
+                this.facing === 'left' ? 'hero_left' : 'hero_right',
+                PLAYER_TARGET_HEIGHT,
+                0.7
+            );
+        });
     }
 
     // remove bullets offscreen
@@ -225,3 +266,20 @@ function update(time) {
         enemy.body.setAllowGravity(false);
     }, this);
 }
+
+const config = {
+    type: Phaser.AUTO,
+    width: GAME_WIDTH,
+    height: GAME_HEIGHT,
+    parent: 'game-container',
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 0 },
+            debug: false
+        }
+    },
+    scene: YumGuzzlersScene
+};
+
+new Phaser.Game(config);
