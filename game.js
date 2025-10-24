@@ -1,21 +1,8 @@
-// Cleaned and fixed game.js for Yum Guzzlers From Space
-// Remove duplicate config/update definitions and ensure start button starts the game properly
-
-let game;
-let player;
-let bullets;
-let enemies;
-let keys;
-let facing = 'right';
-let gameStarted = false;
-let score = 0;
-let scoreText;
-let lastFired = 0;
-
 const config = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
+  parent: 'game-container',
   physics: {
     default: 'arcade',
     arcade: {
@@ -30,142 +17,177 @@ const config = {
   }
 };
 
-// Initialize the Phaser game
-game = new Phaser.Game(config);
+let player;
+let keys;
+let bullets;
+let enemies;
+let lastFired = 0;
+const BULLET_DELAY = 400;
+let facing = 'right';
+let moveDirection = new Phaser.Math.Vector2(1, 0);
+let fireResetTimer = null;
+let gameStarted = false;
+
+const game = new Phaser.Game(config);
 
 function preload() {
-  // Load assets
-  this.load.image('background', 'assets/background.png');
-  this.load.image('hero_left', 'assets/hero_left.png');
-  this.load.image('hero_right', 'assets/hero_right.png');
-  this.load.image('bullet', 'assets/bullet.png');
-  this.load.image('enemy', 'assets/enemy.png');
+    // load hero images
+    this.load.image('hero_left', 'assets/hero/Hero_leftstance.jpeg');
+    this.load.image('hero_left_fire', 'assets/hero/Hero_leftstancefiring.jpeg');
+    this.load.image('hero_right', 'assets/hero/Hero_rightstance.jpeg');
+    this.load.image('hero_right_fire', 'assets/hero/Hero_rightstancefiring.jpeg');
+    // load bullet images
+    this.load.image('bullet_left', 'assets/projectiles/Yumshot_left.jpeg');
+    this.load.image('bullet_right', 'assets/projectiles/Yumshot_right.jpeg');
+    // load enemy
+    this.load.image('enemy', 'assets/enemies/Guz_1.jpeg');
 }
 
 function create() {
-  // Add background
-  this.add.image(400, 300, 'background');
+    bullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 20, runChildUpdate: true });
+    enemies = this.physics.add.group();
 
-  // Create groups for bullets and enemies
-  bullets = this.physics.add.group();
-  enemies = this.physics.add.group();
+    player = this.physics.add.sprite(400, 300, 'hero_right');
+    player.setCollideWorldBounds(true);
 
-  // Create the player sprite
-  player = this.physics.add.sprite(400, 300, 'hero_right');
-  player.setCollideWorldBounds(true);
+    keys = this.input.keyboard.addKeys('W,A,S,D,SPACE');
 
-  // Display score
-  scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '20px', fill: '#fff' });
+    this.physics.pause(); // pause game until start
 
-  // Pause physics initially until start button is clicked
-  this.physics.pause();
-
-  // Grab the start button from the HTML and set up click handler
-  const startButton = document.getElementById('start-button');
-  if (startButton) {
-    startButton.classList.remove('hidden');
+    const startButton = document.getElementById('start-button');
     startButton.addEventListener('click', () => {
-      gameStarted = true;
-      startButton.classList.add('hidden');
-      this.physics.resume();
-      spawnEnemy.call(this);
-    });
-  }
+        if (gameStarted) {
+            return;
+        }
+        gameStarted = true;
+        startButton.classList.add('hidden');
+        this.physics.resume();
+        this.time.addEvent({
+            delay: 1200,
+            callback: spawnEnemy,
+            callbackScope: this,
+            loop: true
+        });
+    }, { once: true });
 
-  // Capture mouse input for firing bullets
-  this.input.mouse.capture = true;
-
-  // Set up keyboard controls (WASD)
-  keys = this.input.keyboard.addKeys({
-    up: Phaser.Input.Keyboard.KeyCodes.W,
-    left: Phaser.Input.Keyboard.KeyCodes.A,
-    down: Phaser.Input.Keyboard.KeyCodes.S,
-    right: Phaser.Input.Keyboard.KeyCodes.D
-  });
+    // bullet-enemy collision
+    this.physics.add.overlap(bullets, enemies, hitEnemy, null, this);
 }
 
 function spawnEnemy() {
-  // Spawn an enemy at a random position around the edges of the screen
-  const positions = [
-    { x: Phaser.Math.Between(0, 800), y: -50 },
-    { x: Phaser.Math.Between(0, 800), y: 650 },
-    { x: -50, y: Phaser.Math.Between(0, 600) },
-    { x: 850, y: Phaser.Math.Between(0, 600) }
-  ];
-  const pos = positions[Phaser.Math.Between(0, positions.length - 1)];
-  const enemy = enemies.create(pos.x, pos.y, 'enemy');
-  // Store a random speed for each enemy
-  enemy.setData('speed', Phaser.Math.Between(50, 100));
+    const spawnEdge = Phaser.Math.Between(0, 3);
+    let x = 0;
+    let y = 0;
+    switch (spawnEdge) {
+        case 0: // top
+            x = Phaser.Math.Between(40, 760);
+            y = -40;
+            break;
+        case 1: // right
+            x = 840;
+            y = Phaser.Math.Between(40, 560);
+            break;
+        case 2: // bottom
+            x = Phaser.Math.Between(40, 760);
+            y = 640;
+            break;
+        default: // left
+            x = -40;
+            y = Phaser.Math.Between(40, 560);
+            break;
+    }
+    const enemy = this.physics.add.sprite(x, y, 'enemy');
+    enemy.body.setAllowGravity(false);
+    enemy.setCollideWorldBounds(false);
+    enemy.setData('speed', Phaser.Math.Between(70, 110));
+    enemies.add(enemy);
 }
 
-function fireBullet(pointer) {
-  // Create a bullet at the player's position and fire toward pointer coordinates
-  const bullet = bullets.create(player.x, player.y, 'bullet');
-  this.physics.moveTo(bullet, pointer.worldX, pointer.worldY, 500);
-  bullet.setData('born', 0);
+function fireBullet() {
+    const time = this.time.now;
+    if (time - lastFired < BULLET_DELAY) {
+        return;
+    }
+    lastFired = time;
+    let bulletKey;
+    let velocityX;
+
+    if (facing === 'right') {
+        bulletKey = 'bullet_right';
+        velocityX = 300;
+    } else {
+        bulletKey = 'bullet_left';
+        velocityX = -300;
+    }
+    const bullet = bullets.get(player.x, player.y, bulletKey);
+    if (!bullet) {
+        return;
+    }
+    bullet.setActive(true);
+    bullet.setVisible(true);
+    bullet.body.enable = true;
+    bullet.setVelocity(velocityX, 0);
+    bullet.setCollideWorldBounds(false);
 }
 
 function hitEnemy(bullet, enemy) {
-  // Destroy bullet and enemy and update score
-  bullet.destroy();
-  enemy.destroy();
-  score += 10;
-  scoreText.setText('Score: ' + score);
-  // Spawn another enemy after one is destroyed
-  spawnEnemy.call(this);
+    bullet.destroy();
+    enemy.destroy();
 }
 
 function update(time, delta) {
-  // Do nothing if the game hasn't started yet
-  if (!gameStarted) return;
-
-  // Player movement logic
-  const speed = 220;
-  let vx = 0;
-  let vy = 0;
-  if (keys.left.isDown) vx -= 1;
-  if (keys.right.isDown) vx += 1;
-  if (keys.up.isDown) vy -= 1;
-  if (keys.down.isDown) vy += 1;
-
-  const velVec = new Phaser.Math.Vector2(vx, vy);
-  if (velVec.lengthSq() > 0) {
-    velVec.normalize();
-    player.setVelocity(velVec.x * speed, velVec.y * speed);
-    // Update facing direction based on horizontal movement
-    if (velVec.x < 0 && facing !== 'left') {
-      facing = 'left';
-      player.setTexture('hero_left');
-    } else if (velVec.x > 0 && facing !== 'right') {
-      facing = 'right';
-      player.setTexture('hero_right');
+    if (!gameStarted) {
+        return;
     }
-  } else {
-    player.setVelocity(0, 0);
-  }
-
-  // Fire bullet when mouse is pressed, with a simple rate limit
-  if (this.input.activePointer.isDown && time > lastFired + 200) {
-    fireBullet.call(this, this.input.activePointer);
-    lastFired = time;
-  }
-
-  // Remove bullets that go offscreen
-  bullets.children.each(function (b) {
-    if (b.x < -40 || b.x > 840 || b.y < -40 || b.y > 640) {
-      b.destroy();
+    // movement
+    moveDirection.set(0, 0);
+    if (keys.A.isDown) {
+        moveDirection.x = -1;
+        facing = 'left';
+    } else if (keys.D.isDown) {
+        moveDirection.x = 1;
+        facing = 'right';
     }
-  }, this);
+    if (keys.W.isDown) {
+        moveDirection.y = -1;
+    } else if (keys.S.isDown) {
+        moveDirection.y = 1;
+    }
+    moveDirection.normalize();
+    player.setVelocity(moveDirection.x * 200, moveDirection.y * 200);
 
-  // Check collisions between bullets and enemies
-  this.physics.add.overlap(bullets, enemies, hitEnemy, null, this);
+    // set sprite based on facing and firing
+    if (facing === 'right') {
+        if (keys.SPACE.isDown) {
+            player.setTexture('hero_right_fire');
+        } else {
+            player.setTexture('hero_right');
+        }
+    } else {
+        if (keys.SPACE.isDown) {
+            player.setTexture('hero_left_fire');
+        } else {
+            player.setTexture('hero_left');
+        }
+    }
 
-  // Make enemies chase the player
-  enemies.children.each(function (enemy) {
-    if (!enemy.active) return;
-    const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
-    const speed = enemy.getData('speed') || 80;
-    this.physics.velocityFromRotation(angle, speed, enemy.body.velocity);
-    enemy.body.setAllowGravity(false);
-  }, this);
+    // fire bullet on space
+    if (keys.SPACE.isDown) {
+        fireBullet.call(this);
+    }
+
+    // update bullets – remove those off-screen
+    bullets.children.iterate((bullet) => {
+        if (bullet && bullet.active && (bullet.x < -50 || bullet.x > 850)) {
+            bullet.destroy();
+        }
+    });
+
+    // enemy chasing player
+    enemies.children.iterate((enemy) => {
+        if (enemy && enemy.active) {
+            const enemySpeed = enemy.getData('speed');
+            this.physics.moveToObject(enemy, player, enemySpeed);
+        }
+    });
 }
