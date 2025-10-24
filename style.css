@@ -36,12 +36,41 @@ main {
   align-items: center;
 }
 
+#game-ui {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
 /* Game container */
 #game-container {
   width: 100%;
   max-width: 800px;
   height: 600px;
   margin: 0 auto;
+}
+
+#start-button {
+  padding: 0.75rem 2rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0a0a0a;
+  background-color: #f0f0f0;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#start-button:hover,
+#start-button:focus {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25);
+}
+
+#start-button.hidden {
+  display: none;
 }
 
 /* Instructions text */
